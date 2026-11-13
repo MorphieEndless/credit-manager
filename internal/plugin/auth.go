@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/yuluo688/credit-manager/internal/service"
@@ -25,16 +26,25 @@ func authenticate(raw []byte) ([]byte, error) {
 	}
 	// CLIProxyAPI's management center queries the read-only model directory
 	// without a client Key. Keep model execution exclusively Key-authenticated.
-	// Globally disabled models are stripped by the response interceptor; Key
-	// allowlists are enforced at reserve/execute time.
+	// Globally disabled models are stripped by the response interceptor; per-Key
+	// allowlists are also applied there when the request carries a valid key.
 	if publicModelDirectoryRequest(req.Method, req.Path) {
+		principal, meta, ok := svc.Authenticate(context.Background(), normalizedAuthHeaders(req.Headers, req.Query))
+		if !ok {
+			return okEnvelope(pluginapi.FrontendAuthResponse{
+				Authenticated: true,
+				Principal:     "credit-manager:model-directory",
+				Metadata:      map[string]string{"plugin": service.PluginID, "public_models": "true"},
+			})
+		}
+		meta["public_models"] = "true"
 		return okEnvelope(pluginapi.FrontendAuthResponse{
 			Authenticated: true,
-			Principal:     "credit-manager:model-directory",
-			Metadata:      map[string]string{"plugin": service.PluginID, "public_models": "true"},
+			Principal:     principal,
+			Metadata:      meta,
 		})
 	}
-	principal, meta, ok := svc.Authenticate(context.Background(), req.Headers)
+	principal, meta, ok := svc.Authenticate(context.Background(), normalizedAuthHeaders(req.Headers, req.Query))
 	if !ok {
 		return okEnvelope(pluginapi.FrontendAuthResponse{Authenticated: false})
 	}
@@ -55,6 +65,51 @@ func publicModelDirectoryRequest(method, path string) bool {
 	default:
 		return false
 	}
+}
+
+// normalizedAuthHeaders returns a copy of headers where native client
+// credentials are rewritten to the canonical Authorization: Bearer form so the
+// downstream chain (principal -> userApiKey -> caller_scope) sees a uniform
+// credential. Priority: explicit Authorization > x-goog-api-key > x-api-key
+// > ?key= query parameter (Gemini SDK style). The original headers are not
+// mutated.
+func normalizedAuthHeaders(headers http.Header, query url.Values) http.Header {
+	if headers != nil && strings.TrimSpace(headers.Get("Authorization")) != "" {
+		return headers
+	}
+	token := ""
+	if headers != nil {
+		for _, name := range []string{"x-goog-api-key", "x-api-key"} {
+			if v := strings.TrimSpace(headers.Get(name)); v != "" {
+				token = v
+				break
+			}
+			for k, values := range headers {
+				if strings.EqualFold(k, name) {
+					for _, v := range values {
+						if v = strings.TrimSpace(v); v != "" {
+							token = v
+						}
+					}
+				}
+				if token != "" {
+					break
+				}
+			}
+		}
+	}
+	if token == "" && len(query) > 0 {
+		token = strings.TrimSpace(query.Get("key"))
+	}
+	if token == "" {
+		return headers
+	}
+	out := headers.Clone()
+	if out == nil {
+		out = http.Header{}
+	}
+	out.Set("Authorization", "Bearer "+token)
+	return out
 }
 
 func interceptRequestAfterAuth(raw []byte) ([]byte, error) {
@@ -160,6 +215,12 @@ func completeInterceptedRequest(raw []byte) ([]byte, error) {
 	return okEnvelope(map[string]any{})
 }
 
+// interceptModelDirectoryResponse strips models the caller cannot use from
+// GET /v1/models and /v1beta/models responses. Globally disabled models are
+// always removed; when the request carries a valid plugin key (Bearer,
+// x-goog-api-key, x-api-key, or ?key= — all normalized at authenticate time
+// into the host's caller_scope metadata), the key's allowed_models allowlist
+// further narrows the directory.
 func interceptModelDirectoryResponse(raw []byte) ([]byte, error) {
 	svc := service.Current()
 	if svc == nil {
@@ -169,7 +230,9 @@ func interceptModelDirectoryResponse(raw []byte) ([]byte, error) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
-	filtered, changed, err := svc.FilterModelDirectory(context.Background(), req.Body)
+	ctx := context.Background()
+	key := resolveDirectoryKey(ctx, svc, req)
+	filtered, changed, err := svc.FilterModelDirectoryForKey(ctx, req.Body, key)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +240,20 @@ func interceptModelDirectoryResponse(raw []byte) ([]byte, error) {
 		return okEnvelope(pluginapi.ResponseInterceptResponse{})
 	}
 	return okEnvelope(pluginapi.ResponseInterceptResponse{Body: filtered})
+}
+
+// resolveDirectoryKey identifies the requesting plugin key for a model
+// directory response. ResolveIdentity first checks credential headers
+// (Bearer / x-goog-api-key / x-api-key, which survive into RequestHeaders),
+// then the caller_scope metadata the host derived from the authenticated
+// principal — which is how ?key= clients are identified. Unresolvable or
+// invalid keys yield nil: the directory degrades to global filtering only.
+func resolveDirectoryKey(ctx context.Context, svc *service.Service, req pluginapi.ResponseInterceptRequest) *store.PluginKey {
+	key, _, err := svc.ResolveIdentity(ctx, req.RequestHeaders, req.Metadata)
+	if err == nil && strings.TrimSpace(key.ID) != "" {
+		return &key
+	}
+	return nil
 }
 
 func modelNotAllowedRejectResponse(message string) pluginapi.RequestInterceptResponse {
