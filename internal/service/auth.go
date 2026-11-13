@@ -11,9 +11,13 @@ import (
 	"github.com/yuluo688/credit-manager/internal/store"
 )
 
-// Authenticate verifies a Bearer plugin key and returns a stable principal.
+// Authenticate verifies a plugin key credential and returns a stable principal.
+// Besides Authorization: Bearer, Gemini/Anthropic-native credentials are
+// honored: x-goog-api-key and x-api-key headers. Query-string ?key= is
+// normalized into the Authorization header by the frontend auth hook before
+// this runs (see plugin.normalizedAuthHeaders).
 func (s *Service) Authenticate(ctx context.Context, headers http.Header) (principal string, metadata map[string]string, ok bool) {
-	raw := bearerToken(headers)
+	raw := credentialToken(headers)
 	if raw == "" {
 		return "", nil, false
 	}
@@ -71,32 +75,54 @@ func (s *Service) LookupPluginKey(ctx context.Context, raw string) (store.Plugin
 }
 
 func (s *Service) LookupPluginKeyFromHeaders(ctx context.Context, headers http.Header) (store.PluginKey, error) {
-	return s.LookupPluginKey(ctx, bearerToken(headers))
+	return s.LookupPluginKey(ctx, credentialToken(headers))
 }
 
-func bearerToken(headers http.Header) string {
+// credentialToken extracts a client credential from the inbound headers.
+// Priority: Authorization: Bearer > x-goog-api-key > x-api-key.
+func credentialToken(headers http.Header) string {
 	if headers == nil {
 		return ""
 	}
-	auth := strings.TrimSpace(headers.Get("Authorization"))
-	if auth == "" {
-		// case-insensitive fallback
-		for k, values := range headers {
-			if strings.EqualFold(k, "Authorization") && len(values) > 0 {
-				auth = strings.TrimSpace(values[0])
-				break
-			}
-		}
+	if auth := bearerToken(headers); auth != "" {
+		return auth
 	}
+	if v := headerValueCI(headers, "x-goog-api-key"); v != "" {
+		return v
+	}
+	if v := headerValueCI(headers, "x-api-key"); v != "" {
+		return v
+	}
+	return ""
+}
+
+func bearerToken(headers http.Header) string {
+	auth := strings.TrimSpace(headerValueCI(headers, "Authorization"))
 	if len(auth) < 8 || !strings.EqualFold(auth[:7], "Bearer ") {
 		return ""
 	}
 	return strings.TrimSpace(auth[7:])
 }
 
+func headerValueCI(headers http.Header, name string) string {
+	if v := strings.TrimSpace(headers.Get(name)); v != "" {
+		return v
+	}
+	for k, values := range headers {
+		if strings.EqualFold(k, name) {
+			for _, v := range values {
+				if v = strings.TrimSpace(v); v != "" {
+					return v
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // ResolveIdentity finds the plugin key for an authenticated execution request.
 func (s *Service) ResolveIdentity(ctx context.Context, headers http.Header, metadata map[string]any) (store.PluginKey, store.Caller, error) {
-	if raw := bearerToken(headers); raw != "" {
+	if raw := credentialToken(headers); raw != "" {
 		if kid, err := keys.Parse(raw); err == nil {
 			key, err := s.store.GetPluginKeyByKid(ctx, kid)
 			if err == nil {
