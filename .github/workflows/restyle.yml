@@ -23,8 +23,18 @@ jobs:
 
       - name: Decode restyle scripts
         run: |
-          base64 -d scripts/restyle/apply_console_css.py.gz.b64 | gunzip > scripts/restyle/apply_console_css.py
-          base64 -d scripts/restyle/apply_remaining.py.gz.b64 | gunzip > scripts/restyle/apply_remaining.py
+          python3 - <<'PY'
+          import base64, gzip, pathlib
+          pairs = [
+              ("scripts/restyle/apply_console_css.py.gz.b64", "scripts/restyle/apply_console_css.py"),
+              ("scripts/restyle/apply_remaining.py.gz.b64", "scripts/restyle/apply_remaining.py"),
+          ]
+          for src, dst in pairs:
+              raw = pathlib.Path(src).read_text()
+              data = gzip.decompress(base64.b64decode(raw, validate=False))
+              pathlib.Path(dst).write_bytes(data)
+              print(f"decoded {src} -> {dst} ({len(data)} bytes)")
+          PY
 
       - name: Apply CPAMP blue-white restyle
         run: |
