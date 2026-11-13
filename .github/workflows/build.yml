@@ -11,7 +11,7 @@ on:
       - ".github/workflows/build.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-plugin-${{ github.ref }}
@@ -59,7 +59,23 @@ jobs:
               exit 1
             fi
           fi
-      - uses: actions/upload-artifact@v4
+          sha256sum "dist/${{ matrix.library }}"
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
         with:
           name: plugin-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/${{ matrix.library }}
+      # Release asset: the only download path that works without a GitHub token,
+      # which is what the deploy box (no gh cli, no credentials) needs.
+      - name: Publish rolling release asset
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: plugin-latest
+          name: Latest plugin build
+          body: |
+            Rolling build of `main`, published automatically.
+            Asset: `${{ matrix.library }}` (linux/amd64, CGO c-shared).
+          files: dist/${{ matrix.library }}
+          prerelease: true
+          make_latest: false
