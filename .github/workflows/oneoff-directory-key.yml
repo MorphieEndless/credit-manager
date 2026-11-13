@@ -31,14 +31,20 @@ jobs:
           s = p.read_text(encoding="utf-8")
           orig = s
 
-          # 1) import "time" (needed by EnsurePluginKeyUsable check)
-          imp_old = '\t"strings"\n\n\t"github.com/yuluo688'
-          imp_new = '\t"strings"\n\t"time"\n\n\t"github.com/yuluo688'
-          if s.count(imp_old) != 1:
-              sys.exit(f"import anchor count={s.count(imp_old)}")
-          s = s.replace(imp_old, imp_new)
+          # 1) import "time" right after the "strings" import, reusing its indent.
+          lines = s.split("\n")
+          added = False
+          for idx, line in enumerate(lines):
+              if line.strip() == '"strings"':
+                  indent = line[: len(line) - len(line.lstrip())]
+                  lines.insert(idx + 1, indent + '"time"')
+                  added = True
+                  break
+          if not added:
+              sys.exit("strings import not found")
+          s = "\n".join(lines)
 
-          # 2) rewrite resolveDirectoryKey + add metadataKeyID
+          # 2) rewrite resolveDirectoryKey and append metadataKeyID.
           start = s.find("// resolveDirectoryKey identifies")
           if start < 0:
               sys.exit("resolveDirectoryKey comment not found")
@@ -51,53 +57,53 @@ jobs:
 
           new_block = '''// resolveDirectoryKey identifies the requesting plugin key for a model
 // directory response. The primary path reads the key id that authenticate()
-// recorded in FrontendAuthResponse metadata: that survives into this request's
-// metadata no matter how the credential was carried, which is the only way a
-// ?key= client can be identified here because ResponseInterceptRequest exposes
-// no query string. Fallbacks: credential headers (Bearer / x-goog-api-key /
-// x-api-key) and the caller_scope handle derived from the host principal.
-// Unresolvable or invalid keys yield nil: the directory then degrades to
-// global filtering only.
+// recorded in FrontendAuthResponse metadata: that value survives into this
+// request's metadata no matter how the credential was carried, which is the
+// only way a ?key= client can be identified here, because
+// ResponseInterceptRequest exposes no query string. Fallbacks: credential
+// headers (Bearer / x-goog-api-key / x-api-key) and the caller_scope handle
+// derived from the host principal. Unresolvable or invalid keys yield nil:
+// the directory then degrades to global filtering only.
 func resolveDirectoryKey(ctx context.Context, svc *service.Service, req pluginapi.ResponseInterceptRequest) *store.PluginKey {
-	if kid := metadataKeyID(req.Metadata); kid != "" {
-		if key, err := svc.Store().GetPluginKeyByKid(ctx, kid); err == nil {
-			if err := store.EnsurePluginKeyUsable(key, time.Now().UTC()); err == nil {
-				return &key
-			}
-		}
-	}
-	key, _, err := svc.ResolveIdentity(ctx, req.RequestHeaders, req.Metadata)
-	if err == nil && strings.TrimSpace(key.ID) != "" {
-		return &key
-	}
-	return nil
+    if kid := metadataKeyID(req.Metadata); kid != "" {
+        if key, err := svc.Store().GetPluginKeyByKid(ctx, kid); err == nil {
+            if err := store.EnsurePluginKeyUsable(key, time.Now().UTC()); err == nil {
+                return &key
+            }
+        }
+    }
+    key, _, err := svc.ResolveIdentity(ctx, req.RequestHeaders, req.Metadata)
+    if err == nil && strings.TrimSpace(key.ID) != "" {
+        return &key
+    }
+    return nil
 }
 
 // metadataKeyID reads the plugin key id that authenticate() reported for the
 // request. FrontendAuthResponse metadata reaches downstream interceptors as-is,
-// so the value is a plain string; tolerate JSON-decoded shapes as well.
+// so the value is normally a plain string; tolerate JSON-decoded shapes too.
 func metadataKeyID(metadata map[string]any) string {
-	if metadata == nil {
-		return ""
-	}
-	switch typed := metadata["kid"].(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case []string:
-		if len(typed) > 0 {
-			return strings.TrimSpace(typed[0])
-		}
-	case []any:
-		if len(typed) > 0 {
-			if value, ok := typed[0].(string); ok {
-				return strings.TrimSpace(value)
-			}
-		}
-	}
-	return ""
+    if metadata == nil {
+        return ""
+    }
+    switch typed := metadata["kid"].(type) {
+    case string:
+        return strings.TrimSpace(typed)
+    case []string:
+        if len(typed) > 0 {
+            return strings.TrimSpace(typed[0])
+        }
+    case []any:
+        if len(typed) > 0 {
+            if value, ok := typed[0].(string); ok {
+                return strings.TrimSpace(value)
+            }
+        }
+    }
+    return ""
 }
 '''
-          s = s[:start] + new_block + s[end + 3:]
+          s = s[:start] + new_block + s[end + 3 :]
 
           if s == orig:
               sys.exit("no changes produced")
@@ -105,13 +111,14 @@ func metadataKeyID(metadata map[string]any) string {
           print("auth.go patched")
           PY
 
-      - name: Verify
+      - name: Format and verify
         run: |
           set -euo pipefail
-          gofmt -l internal/plugin/auth.go
+          gofmt -w internal/plugin/auth.go
+          test -z "$(gofmt -l internal/plugin/auth.go)"
           go build ./...
           go vet ./internal/plugin/...
-          grep -c 'metadataKeyID' internal/plugin/auth.go
+          grep -c metadataKeyID internal/plugin/auth.go
 
       - name: Commit and retire this workflow
         run: |
