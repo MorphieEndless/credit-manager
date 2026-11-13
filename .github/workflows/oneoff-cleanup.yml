@@ -1,0 +1,36 @@
+name: One-off cleanup (stale branch)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/oneoff-cleanup.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Delete stale branch
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin v1.9.4-morphie.1 >/dev/null 2>&1; then
+            git push origin --delete v1.9.4-morphie.1
+            echo "deleted v1.9.4-morphie.1"
+          else
+            echo "branch already gone"
+          fi
+
+      - name: Retire this workflow
+        run: |
+          set -euo pipefail
+          git rm -q .github/workflows/oneoff-cleanup.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(ci): retire one-off branch cleanup workflow"
+          git push
