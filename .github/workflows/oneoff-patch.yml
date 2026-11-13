@@ -1,0 +1,84 @@
+name: One-off patch (models directory test)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/oneoff-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rewrite models-directory test for allowlist filtering
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, sys
+
+          p = pathlib.Path("internal/service/service_test.go")
+          s = p.read_text(encoding="utf-8")
+          orig = s
+
+          # 1) pointer signature
+          for anchor in ("ctx, body, store.PluginKey{", "ctx, allowedBody, store.PluginKey{"):
+              new = anchor.replace("store.PluginKey{", "&store.PluginKey{")
+              if s.count(anchor) != 1:
+                  sys.exit(f"anchor not unique: {anchor} ({s.count(anchor)})")
+              s = s.replace(anchor, new)
+
+          # 2) directory now also drops models outside the key allowlist
+          a_old = re.compile(
+              r'if len\(payload\.Data\) != 1 \|\| payload\.Data\[0\]\.ID != "claude-sonnet" \{\s*'
+              r't\.Fatalf\("directory list should only drop globally disabled models, got %#v", payload\.Data\)\s*\}'
+          )
+          a_new = (
+              'if len(payload.Data) != 0 {\n'
+              '\t\tt.Fatalf("directory list must keep only allowed, non-disabled models, got %#v", payload.Data)\n'
+              '\t}'
+          )
+          s, n = a_old.subn(a_new, s)
+          if n != 1:
+              sys.exit(f"assertion A replaced {n} times")
+
+          # 3) allowlist now clips the directory
+          b_old = re.compile(
+              r'if allowedChanged \{\s*'
+              r't\.Fatalf\("allowlist must not clip GET /v1/models, got %s", allowedFiltered\)\s*\}'
+          )
+          b_new = (
+              'if !allowedChanged {\n'
+              '\t\tt.Fatalf("allowlist must clip GET /v1/models, got %s", allowedFiltered)\n'
+              '\t}\n'
+              '\tif err := json.Unmarshal(allowedFiltered, &payload); err != nil {\n'
+              '\t\tt.Fatalf("decode allowlist filter: %v", err)\n'
+              '\t}\n'
+              '\tif len(payload.Data) != 1 || payload.Data[0].ID != "claude-sonnet" {\n'
+              '\t\tt.Fatalf("allowlist filtered = %#v", payload.Data)\n'
+              '\t}'
+          )
+          s, n = b_old.subn(b_new, s)
+          if n != 1:
+              sys.exit(f"assertion B replaced {n} times")
+
+          if s == orig:
+              sys.exit("no changes produced")
+
+          p.write_text(s, encoding="utf-8")
+          print("service_test.go patched")
+          PY
+
+      - name: Commit and retire this workflow
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add internal/service/service_test.go
+          git rm -q .github/workflows/oneoff-patch.yml
+          git commit -m "test(service): expect allowlist to clip the model directory"
+          git push
