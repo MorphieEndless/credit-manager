@@ -1784,7 +1784,7 @@
     })).sort((a, b) => b.tokens - a.tokens || b.requests - a.requests);
   }
 
-  const MODEL_SHARE_COLORS = ['#7c6cf0', '#3ecf8e', '#f0a04b', '#e88b9a', '#4dabf7', '#20c997', '#ff922b', '#cc5de8', '#51cf66', '#339af0'];
+  const MODEL_SHARE_COLORS = ['#3b82f6', '#60a5fa', '#22c55e', '#f59e0b', '#93c5fd', '#38bdf8', '#a5b4fc', '#f87171'];
 
   function getModelShareMetric() {
     const metric = state.modelShareMetric || 'requests';
@@ -2334,11 +2334,11 @@
       legend: { show: false, data: series.map(item => item.label) },
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(26, 31, 28, .94)',
+        backgroundColor: 'rgba(15, 23, 42, .94)',
         borderWidth: 0,
         padding: [10, 12],
         textStyle: { color: '#fff', fontSize: 12 },
-        axisPointer: { type: 'line', lineStyle: { color: '#9ea9a1', type: 'dashed' } },
+        axisPointer: { type: 'line', lineStyle: { color: '#94a3b8', type: 'dashed' } },
         formatter(params) {
           const rows = params.map(param => {
             const item = series[param.seriesIndex];
@@ -2351,23 +2351,23 @@
         type: 'category',
         boundaryGap: false,
         data: points.map(point => point.date),
-        axisLine: { lineStyle: { color: '#dce5de' } },
+        axisLine: { lineStyle: { color: '#d8e5f2' } },
         axisTick: { show: false },
-        axisLabel: { color: '#6a766e', fontSize: 11, hideOverlap: true, margin: 10, interval: points.length <= 14 ? 0 : 'auto' },
+        axisLabel: { color: '#5f6c7b', fontSize: 11, hideOverlap: true, margin: 10, interval: points.length <= 14 ? 0 : 'auto' },
       },
       yAxis: [
         {
           type: 'value',
           min: 0,
           splitNumber: 3,
-          axisLabel: { color: '#6a766e', fontSize: 11, formatter: value => options.formatLeft(value) },
-          splitLine: { lineStyle: { color: '#edf1ee', type: 'dashed' } },
+          axisLabel: { color: '#5f6c7b', fontSize: 11, formatter: value => options.formatLeft(value) },
+          splitLine: { lineStyle: { color: '#eef4fa', type: 'dashed' } },
           axisLine: { show: false },
           axisTick: { show: false },
         },
         ...(hasRightAxis ? [{
           type: 'value', min: 0, max: 100, splitNumber: 2,
-          axisLabel: { color: '#c56b82', fontSize: 11, formatter: value => options.formatRight(value) },
+          axisLabel: { color: '#f59e0b', fontSize: 11, formatter: value => options.formatRight(value) },
           splitLine: { show: false }, axisLine: { show: false }, axisTick: { show: false },
         }] : []),
       ],
@@ -2375,8 +2375,8 @@
         type: 'inside', start: 0, end: 100, zoomOnMouseWheel: 'shift', moveOnMouseMove: true,
       }, {
         type: 'slider', height: 14, bottom: 2, start: 0, end: 100,
-        borderColor: 'transparent', backgroundColor: '#f0f4f1', fillerColor: 'rgba(30,183,135,.20)',
-        handleStyle: { color: '#1eb787', borderColor: '#1eb787' }, textStyle: { color: 'transparent' },
+        borderColor: 'transparent', backgroundColor: 'rgba(59,130,246,.08)', fillerColor: 'rgba(59,130,246,.20)',
+        handleStyle: { color: '#3b82f6', borderColor: '#3b82f6' }, textStyle: { color: 'transparent' },
       }] : [],
       series: series.map(item => ({
         name: item.label,
@@ -2400,7 +2400,7 @@
           xAxis: { axisLabel: { fontSize: 10 } },
           yAxis: [
             { axisLabel: { fontSize: 10, formatter: value => options.formatLeft(value) } },
-            ...(hasRightAxis ? [{ axisLabel: { fontSize: 10, color: '#c56b82', formatter: value => options.formatRight(value) } }] : []),
+            ...(hasRightAxis ? [{ axisLabel: { fontSize: 10, color: '#f59e0b', formatter: value => options.formatRight(value) } }] : []),
           ],
         },
       }],
@@ -2416,10 +2416,10 @@
     const totalCacheRelated = points.reduce((sum, point) => sum + point.cacheRelated, 0);
     const avgHit = totalCacheRelated > 0 ? totalCacheRead / totalCacheRelated * 100 : 0;
     $('overviewTrendTotal').innerHTML = points.length
-      ? trendMetric('入', formatTokens(totalInput), '#1eb787', tokenTitle(totalInput), '输入') +
-        trendMetric('出', formatTokens(totalOutput), '#7968ee', tokenTitle(totalOutput), '输出') +
-        trendMetric('缓存', formatTokens(totalCacheRead), '#f0a04b', tokenTitle(totalCacheRead), '缓存读取') +
-        (totalCacheRelated > 0 ? trendMetric('命中', avgHit.toFixed(1) + '%', '#e56b8a', '', '缓存命中率', true) : '')
+      ? trendMetric('入', formatTokens(totalInput), '#3b82f6', tokenTitle(totalInput), '输入') +
+        trendMetric('出', formatTokens(totalOutput), '#60a5fa', tokenTitle(totalOutput), '输出') +
+        trendMetric('缓存', formatTokens(totalCacheRead), '#f59e0b', tokenTitle(totalCacheRead), '缓存读取') +
+        (totalCacheRelated > 0 ? trendMetric('命中', avgHit.toFixed(1) + '%', '#ef4444', '', '缓存命中率', true) : '')
       : '';
     $('overviewTrendHint').textContent = points.length
       ? points.length + ' 个有使用记录的' + trendGrainUnit(grain) + trendZoneSuffix()
@@ -2435,25 +2435,25 @@
         {
           key: 'input',
           label: '输入',
-          color: '#1eb787',
+          color: '#3b82f6',
           format: value => formatTokens(value) + ' Token',
         },
         {
           key: 'output',
           label: '输出',
-          color: '#7968ee',
+          color: '#60a5fa',
           format: value => formatTokens(value) + ' Token',
         },
         {
           key: 'cacheRead',
           label: '缓存读取',
-          color: '#f0a04b',
+          color: '#f59e0b',
           format: value => formatTokens(value) + ' Token',
         },
         {
           key: 'cacheHitRate',
           label: '缓存命中率',
-          color: '#e56b8a',
+          color: '#ef4444',
           axis: 'right',
           dashed: true,
           format: value => value.toFixed(1) + '%',
@@ -2467,7 +2467,7 @@
     const grain = getTrendGrain('cost');
     const points = overviewTrendSeries(items, grain);
     const total = points.reduce((sum, point) => sum + point.cost, 0);
-    $('overviewCostTrendTotal').innerHTML = points.length ? trendMetric('费用', formatMoney(total), '#1eb787', '', '费用') : '';
+    $('overviewCostTrendTotal').innerHTML = points.length ? trendMetric('费用', formatMoney(total), '#3b82f6', '', '费用') : '';
     $('overviewCostTrendHint').textContent = points.length
       ? points.length + ' 个有使用记录的' + trendGrainUnit(grain) + trendZoneSuffix()
       : '按' + trendGrainUnit(grain) + '汇总实际费用';
@@ -2481,8 +2481,8 @@
         {
           key: 'cost',
           label: '费用',
-          color: '#1eb787',
-          fill: 'rgba(30,183,135,.13)',
+          color: '#3b82f6',
+          fill: 'rgba(59,130,246,.13)',
           format: value => formatMoney(value),
         },
       ],
@@ -2555,17 +2555,17 @@
       legend: { show: false },
       tooltip: {
         trigger: 'item',
-        backgroundColor: 'rgba(26, 31, 28, .94)',
+        backgroundColor: 'rgba(15, 23, 42, .94)',
         borderWidth: 0,
         padding: [10, 12],
         textStyle: { color: '#fff', fontSize: 12 },
         formatter(param) {
           const item = param.data.item;
           return '<strong>'+esc(item.model)+'</strong><br/>'+
-            '<span style="color:#cdd6cf">'+esc(t('调用次数'))+'</span><span style="float:right;margin-left:20px;font-weight:700">'+esc(item.requests.toLocaleString())+'</span><br/>'+
-            '<span style="color:#cdd6cf">Token</span><span style="float:right;margin-left:20px;font-weight:700">'+esc(formatTokens(item.tokens))+'</span><br/>'+
-            '<span style="color:#cdd6cf">'+esc(t('费用'))+'</span><span style="float:right;margin-left:20px;font-weight:700">'+esc(formatMoney(item.cost))+'</span><br/>'+
-            '<span style="color:#cdd6cf">'+esc(t('占比'))+'</span><span style="float:right;margin-left:20px">'+param.percent.toFixed(1)+'%</span>';
+            '<span style="color:#cbd5e1">'+esc(t('调用次数'))+'</span><span style="float:right;margin-left:20px;font-weight:700">'+esc(item.requests.toLocaleString())+'</span><br/>'+
+            '<span style="color:#cbd5e1">Token</span><span style="float:right;margin-left:20px;font-weight:700">'+esc(formatTokens(item.tokens))+'</span><br/>'+
+            '<span style="color:#cbd5e1">'+esc(t('费用'))+'</span><span style="float:right;margin-left:20px;font-weight:700">'+esc(formatMoney(item.cost))+'</span><br/>'+
+            '<span style="color:#cbd5e1">'+esc(t('占比'))+'</span><span style="float:right;margin-left:20px">'+param.percent.toFixed(1)+'%</span>';
         },
       },
       series: [{
@@ -2581,8 +2581,8 @@
           position: 'center',
           formatter: '{total|' + formatModelShareCenter(metricTotal, metric) + '}\n{caption|' + modelShareCenterLabel(metric) + '}',
           rich: {
-            total: { color: '#1f2922', fontSize: 18, fontWeight: 700, lineHeight: 24 },
-            caption: { color: '#5f6a61', fontSize: 11, fontWeight: 600, lineHeight: 16 },
+            total: { color: '#2c3e50', fontSize: 18, fontWeight: 700, lineHeight: 24 },
+            caption: { color: '#5f6c7b', fontSize: 11, fontWeight: 600, lineHeight: 16 },
           },
         },
         labelLine: { show: false },
