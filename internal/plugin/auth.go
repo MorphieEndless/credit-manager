@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/yuluo688/credit-manager/internal/service"
 	"github.com/yuluo688/credit-manager/internal/store"
@@ -243,17 +244,52 @@ func interceptModelDirectoryResponse(raw []byte) ([]byte, error) {
 }
 
 // resolveDirectoryKey identifies the requesting plugin key for a model
-// directory response. ResolveIdentity first checks credential headers
-// (Bearer / x-goog-api-key / x-api-key, which survive into RequestHeaders),
-// then the caller_scope metadata the host derived from the authenticated
-// principal — which is how ?key= clients are identified. Unresolvable or
-// invalid keys yield nil: the directory degrades to global filtering only.
+// directory response. The primary path reads the key id that
+// authenticate() recorded in FrontendAuthResponse metadata: that value
+// survives into this request's metadata no matter how the credential was
+// carried, which is the only way a ?key= client can be identified here,
+// because ResponseInterceptRequest exposes no query string. Fallbacks:
+// credential headers (Bearer / x-goog-api-key / x-api-key) and the
+// caller_scope handle derived from the host principal. Unresolvable or
+// invalid keys yield nil: the directory then degrades to global filtering.
 func resolveDirectoryKey(ctx context.Context, svc *service.Service, req pluginapi.ResponseInterceptRequest) *store.PluginKey {
+	if kid := metadataKeyID(req.Metadata); kid != "" {
+		if key, err := svc.Store().GetPluginKeyByKid(ctx, kid); err == nil {
+			if err := store.EnsurePluginKeyUsable(key, time.Now().UTC()); err == nil {
+				return &key
+			}
+		}
+	}
 	key, _, err := svc.ResolveIdentity(ctx, req.RequestHeaders, req.Metadata)
 	if err == nil && strings.TrimSpace(key.ID) != "" {
 		return &key
 	}
 	return nil
+}
+
+// metadataKeyID reads the plugin key id that authenticate() reported for
+// the request. FrontendAuthResponse metadata reaches downstream
+// interceptors as-is, so the value is normally a plain string; tolerate
+// JSON-decoded shapes too.
+func metadataKeyID(metadata map[string]any) string {
+	if metadata == nil {
+		return ""
+	}
+	switch typed := metadata["kid"].(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case []string:
+		if len(typed) > 0 {
+			return strings.TrimSpace(typed[0])
+		}
+	case []any:
+		if len(typed) > 0 {
+			if value, ok := typed[0].(string); ok {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return ""
 }
 
 func modelNotAllowedRejectResponse(message string) pluginapi.RequestInterceptResponse {
