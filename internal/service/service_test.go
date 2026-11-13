@@ -364,24 +364,30 @@ func TestFilterModelDirectoryRemovesDisabled(t *testing.T) {
 		t.Fatalf("filtered = %#v", payload.Data)
 	}
 
-	keyFiltered, keyChanged, err := svc.FilterModelDirectoryForKey(ctx, body, store.PluginKey{AllowedModels: []string{"gpt-4o"}})
+	keyFiltered, keyChanged, err := svc.FilterModelDirectoryForKey(ctx, body, &store.PluginKey{AllowedModels: []string{"gpt-4o"}})
 	if err != nil || !keyChanged {
 		t.Fatalf("key filter = %s changed=%t err=%v", keyFiltered, keyChanged, err)
 	}
 	if err := json.Unmarshal(keyFiltered, &payload); err != nil {
 		t.Fatalf("decode key filter: %v", err)
 	}
-	if len(payload.Data) != 1 || payload.Data[0].ID != "claude-sonnet" {
-		t.Fatalf("directory list should only drop globally disabled models, got %#v", payload.Data)
+	if len(payload.Data) != 0 {
+		t.Fatalf("directory list must keep only allowed, non-disabled models, got %#v", payload.Data)
 	}
 
 	allowedBody := []byte(`{"object":"list","data":[{"id":"claude-sonnet","object":"model"},{"id":"other","object":"model"}]}`)
-	allowedFiltered, allowedChanged, err := svc.FilterModelDirectoryForKey(ctx, allowedBody, store.PluginKey{AllowedModels: []string{"claude-sonnet"}})
+	allowedFiltered, allowedChanged, err := svc.FilterModelDirectoryForKey(ctx, allowedBody, &store.PluginKey{AllowedModels: []string{"claude-sonnet"}})
 	if err != nil {
 		t.Fatalf("allowlist filter err=%v", err)
 	}
-	if allowedChanged {
-		t.Fatalf("allowlist must not clip GET /v1/models, got %s", allowedFiltered)
+	if !allowedChanged {
+		t.Fatalf("allowlist must clip GET /v1/models, got %s", allowedFiltered)
+	}
+	if err := json.Unmarshal(allowedFiltered, &payload); err != nil {
+		t.Fatalf("decode allowlist filter: %v", err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].ID != "claude-sonnet" {
+		t.Fatalf("allowlist filtered = %#v", payload.Data)
 	}
 
 	hidden := svc.HiddenDirectoryModels(ctx, []string{"gpt-4o", "claude-sonnet", "other"})
