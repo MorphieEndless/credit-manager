@@ -1,0 +1,54 @@
+name: Build plugin (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            library: credit-manager.so
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Vet and test
+        run: |
+          go vet ./...
+          go test ./...
+      - name: Build Unix dynamic library
+        shell: bash
+        env:
+          GOAMD64: ${{ matrix.goarch == 'amd64' && 'v1' || '' }}
+          CGO_CFLAGS: ${{ matrix.goarch == 'amd64' && '-O2 -g -march=x86-64' || '' }}
+          CGO_CXXFLAGS: ${{ matrix.goarch == 'amd64' && '-O2 -g -march=x86-64' || '' }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=1 go build -buildmode=c-shared -o "dist/${{ matrix.library }}" .
+          if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "amd64" ]; then
+            section="$(objdump -d --no-show-raw-insn "dist/${{ matrix.library }}" | sed -n '/<x_cgo_sigaction>:/,/^$/p')"
+            test -n "$section"
+            if printf '%s\n' "$section" | grep -qE '\b(shlx|mulx|andn|bzhi|bextr|sarx|pdep|pext)\b'; then
+              echo "BMI2 leaked into x_cgo_sigaction" >&2
+              printf '%s\n' "$section" >&2
+              exit 1
+            fi
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ matrix.library }}
+          if-no-files-found: error
