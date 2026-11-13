@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
@@ -25,6 +29,7 @@ jobs:
             goarch: amd64
             library: credit-manager.so
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
@@ -32,7 +37,7 @@ jobs:
           go-version-file: go.mod
           check-latest: true
       - name: Vet and test
-        run: |
+        run: |-
           go vet ./...
           go test ./...
       - name: Build Unix dynamic library
@@ -41,7 +46,7 @@ jobs:
           GOAMD64: ${{ matrix.goarch == 'amd64' && 'v1' || '' }}
           CGO_CFLAGS: ${{ matrix.goarch == 'amd64' && '-O2 -g -march=x86-64' || '' }}
           CGO_CXXFLAGS: ${{ matrix.goarch == 'amd64' && '-O2 -g -march=x86-64' || '' }}
-        run: |
+        run: |-
           set -euo pipefail
           mkdir -p dist
           CGO_ENABLED=1 go build -buildmode=c-shared -o "dist/${{ matrix.library }}" .
@@ -58,4 +63,3 @@ jobs:
         with:
           name: plugin-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/${{ matrix.library }}
-          if-no-files-found: error
