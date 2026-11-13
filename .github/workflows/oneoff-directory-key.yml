@@ -24,6 +24,56 @@ jobs:
 
       - name: Apply patch
         run: |
+          cat > /tmp/directory_key.go <<'GO'
+          // resolveDirectoryKey identifies the requesting plugin key for a model
+          // directory response. The primary path reads the key id that
+          // authenticate() recorded in FrontendAuthResponse metadata: that value
+          // survives into this request's metadata no matter how the credential was
+          // carried, which is the only way a ?key= client can be identified here,
+          // because ResponseInterceptRequest exposes no query string. Fallbacks:
+          // credential headers (Bearer / x-goog-api-key / x-api-key) and the
+          // caller_scope handle derived from the host principal. Unresolvable or
+          // invalid keys yield nil: the directory then degrades to global filtering.
+          func resolveDirectoryKey(ctx context.Context, svc *service.Service, req pluginapi.ResponseInterceptRequest) *store.PluginKey {
+              if kid := metadataKeyID(req.Metadata); kid != "" {
+                  if key, err := svc.Store().GetPluginKeyByKid(ctx, kid); err == nil {
+                      if err := store.EnsurePluginKeyUsable(key, time.Now().UTC()); err == nil {
+                          return &key
+                      }
+                  }
+              }
+              key, _, err := svc.ResolveIdentity(ctx, req.RequestHeaders, req.Metadata)
+              if err == nil && strings.TrimSpace(key.ID) != "" {
+                  return &key
+              }
+              return nil
+          }
+
+          // metadataKeyID reads the plugin key id that authenticate() reported for
+          // the request. FrontendAuthResponse metadata reaches downstream
+          // interceptors as-is, so the value is normally a plain string; tolerate
+          // JSON-decoded shapes too.
+          func metadataKeyID(metadata map[string]any) string {
+              if metadata == nil {
+                  return ""
+              }
+              switch typed := metadata["kid"].(type) {
+              case string:
+                  return strings.TrimSpace(typed)
+              case []string:
+                  if len(typed) > 0 {
+                      return strings.TrimSpace(typed[0])
+                  }
+              case []any:
+                  if len(typed) > 0 {
+                      if value, ok := typed[0].(string); ok {
+                          return strings.TrimSpace(value)
+                      }
+                  }
+              }
+              return ""
+          }
+          GO
           python3 - <<'PY'
           import pathlib, sys
 
@@ -31,79 +81,27 @@ jobs:
           s = p.read_text(encoding="utf-8")
           orig = s
 
-          # 1) import "time" right after the "strings" import, reusing its indent.
+          # import "time" after the "strings" import, reusing its indent
           lines = s.split("\n")
-          added = False
+          done = False
           for idx, line in enumerate(lines):
               if line.strip() == '"strings"':
                   indent = line[: len(line) - len(line.lstrip())]
                   lines.insert(idx + 1, indent + '"time"')
-                  added = True
+                  done = True
                   break
-          if not added:
+          if not done:
               sys.exit("strings import not found")
           s = "\n".join(lines)
 
-          # 2) rewrite resolveDirectoryKey and append metadataKeyID.
           start = s.find("// resolveDirectoryKey identifies")
-          if start < 0:
-              sys.exit("resolveDirectoryKey comment not found")
           sig = s.find("func resolveDirectoryKey(", start)
-          if sig < 0:
-              sys.exit("resolveDirectoryKey func not found")
           end = s.find("\n}\n", sig)
-          if end < 0:
-              sys.exit("resolveDirectoryKey body end not found")
+          if start < 0 or sig < 0 or end < 0:
+              sys.exit("resolveDirectoryKey block not found")
 
-          new_block = '''// resolveDirectoryKey identifies the requesting plugin key for a model
-// directory response. The primary path reads the key id that authenticate()
-// recorded in FrontendAuthResponse metadata: that value survives into this
-// request's metadata no matter how the credential was carried, which is the
-// only way a ?key= client can be identified here, because
-// ResponseInterceptRequest exposes no query string. Fallbacks: credential
-// headers (Bearer / x-goog-api-key / x-api-key) and the caller_scope handle
-// derived from the host principal. Unresolvable or invalid keys yield nil:
-// the directory then degrades to global filtering only.
-func resolveDirectoryKey(ctx context.Context, svc *service.Service, req pluginapi.ResponseInterceptRequest) *store.PluginKey {
-    if kid := metadataKeyID(req.Metadata); kid != "" {
-        if key, err := svc.Store().GetPluginKeyByKid(ctx, kid); err == nil {
-            if err := store.EnsurePluginKeyUsable(key, time.Now().UTC()); err == nil {
-                return &key
-            }
-        }
-    }
-    key, _, err := svc.ResolveIdentity(ctx, req.RequestHeaders, req.Metadata)
-    if err == nil && strings.TrimSpace(key.ID) != "" {
-        return &key
-    }
-    return nil
-}
-
-// metadataKeyID reads the plugin key id that authenticate() reported for the
-// request. FrontendAuthResponse metadata reaches downstream interceptors as-is,
-// so the value is normally a plain string; tolerate JSON-decoded shapes too.
-func metadataKeyID(metadata map[string]any) string {
-    if metadata == nil {
-        return ""
-    }
-    switch typed := metadata["kid"].(type) {
-    case string:
-        return strings.TrimSpace(typed)
-    case []string:
-        if len(typed) > 0 {
-            return strings.TrimSpace(typed[0])
-        }
-    case []any:
-        if len(typed) > 0 {
-            if value, ok := typed[0].(string); ok {
-                return strings.TrimSpace(value)
-            }
-        }
-    }
-    return ""
-}
-'''
-          s = s[:start] + new_block + s[end + 3 :]
+          block = pathlib.Path("/tmp/directory_key.go").read_text(encoding="utf-8").rstrip("\n") + "\n"
+          s = s[:start] + block + s[end + 3 :]
 
           if s == orig:
               sys.exit("no changes produced")
