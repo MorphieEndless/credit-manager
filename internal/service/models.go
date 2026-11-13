@@ -80,14 +80,19 @@ func (s *Service) HiddenDirectoryModels(ctx context.Context, catalog []string) [
 }
 
 func (s *Service) FilterModelDirectory(ctx context.Context, body []byte) ([]byte, bool, error) {
-	return s.filterModelDirectory(ctx, body)
+	return s.filterModelDirectory(ctx, body, nil)
 }
 
-func (s *Service) FilterModelDirectoryForKey(ctx context.Context, body []byte, _ store.PluginKey) ([]byte, bool, error) {
-	return s.filterModelDirectory(ctx, body)
+// FilterModelDirectoryForKey filters the model directory by global disabled
+// pricing rules, and additionally by the key's allowed_models allowlist when a
+// non-nil key with a non-empty allowlist is provided. store.ModelAllowed uses
+// exact match plus filepath.Match globs, the same semantics as execution-time
+// enforcement.
+func (s *Service) FilterModelDirectoryForKey(ctx context.Context, body []byte, key *store.PluginKey) ([]byte, bool, error) {
+	return s.filterModelDirectory(ctx, body, key)
 }
 
-func (s *Service) filterModelDirectory(ctx context.Context, body []byte) ([]byte, bool, error) {
+func (s *Service) filterModelDirectory(ctx context.Context, body []byte, key *store.PluginKey) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
 	}
@@ -122,6 +127,10 @@ func (s *Service) filterModelDirectory(ctx context.Context, body []byte) ([]byte
 				continue
 			}
 			if modelDisabledByRules(id, rules) {
+				changed = true
+				continue
+			}
+			if key != nil && len(key.AllowedModels) > 0 && !store.ModelAllowed(*key, id) {
 				changed = true
 				continue
 			}
